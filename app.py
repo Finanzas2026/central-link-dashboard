@@ -12,7 +12,16 @@ st.set_page_config(page_title="Central Link – Investment Summary", layout="wid
 # ── ESTILOS ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.main .block-container { padding-top: 2rem; }
+/* Forzar modo escritorio */
+.main .block-container {
+    min-width: 1100px;
+    max-width: 1400px;
+    padding-top: 2rem;
+}
+section[data-testid="stSidebar"] { display: none; }
+@media (max-width: 768px) {
+    .main .block-container { min-width: 1100px; overflow-x: auto; }
+}
 .kpi-card {
     background: #ffffff;
     border-radius: 10px;

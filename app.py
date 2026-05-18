@@ -1,247 +1,295 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-import requests
-import io
+import re
 
-FILE_ID = st.secrets["FILE_ID"]
-HOJA    = "Invest Summary-CONSOLIDATED"
+# ── BASE DE CONOCIMIENTO DEL CHATBOT ───────────────────────────────────────────
+KNOWLEDGE = [
+    # Dashboards
+    {
+        "keys": ["cash flow","flujo","efectivo","cashflow"],
+        "resp": "📊 **Cash Flow Dashboard** monitorea el flujo de efectivo mensual de CD&P.\n\n"
+                "Incluye: Ingresos, Gastos Operativos (Admin, Capital Humano, Marketing, Operativos), "
+                "Taxes, Financial Outflows y Efectivo Cierre de Mes para los períodos **2025–2028**.\n\n"
+                "👉 [Abrir Cash Flow](https://cashflow-rnqmupyaqzpdva42uw6ywt.streamlit.app/)"
+    },
+    {
+        "keys": ["central link","closing","investment","capex","opex","irr","npv","roi","equity multiple","equity"],
+        "resp": "🏗️ **Closing Project Assumptions — Central Link** es el Investment Summary Q4 del proyecto.\n\n"
+                "Muestra: Total Equity ($8.1M PC), Total CAPEX ($16.5M PC), Total Revenue ($30.6M PC), "
+                "Net Profit ($13.4M PC), IRR (14.4%), NPV ($9.6M), Equity Multiple (3.76x) y ROI (64.97%).\n\n"
+                "Compara **Project Closing vs Business Plan**.\n\n"
+                "👉 [Abrir Central Link](https://closing-ydh6wy5habve4kbgqchkep.streamlit.app/)"
+    },
+    {
+        "keys": ["estado de resultado","p&l","pl","presupuesto","ebitda","utilidad","ingresos","gastos operativos"],
+        "resp": "📈 **Estado de Resultado Dashboard** muestra el P&L de CD&P.\n\n"
+                "Compara **Ejecutado 2025 vs Presupuesto 2026, 2027 y 2028**.\n\n"
+                "Incluye: Ingresos, Utilidad Bruta, Gastos Operativos desglosados (Admin, Capital Humano, "
+                "Marketing, Operativos), EBITDA, Utilidad Operativa, Otros Ingresos/Egresos y Utilidad Neta.\n\n"
+                "👉 [Abrir Estado de Resultado](https://estado-de-resultado-j2xcmkofq7q7zwnqs9ycmu.streamlit.app/)"
+    },
+    # Conceptos financieros
+    {
+        "keys": ["irr","tir","tasa interna","internal rate"],
+        "resp": "📐 **IRR (Internal Rate of Return / Tasa Interna de Retorno)**\n\n"
+                "Es la tasa de descuento que hace que el VPN (NPV) de un proyecto sea igual a cero. "
+                "Indica la rentabilidad anualizada de la inversión.\n\n"
+                "✅ Si el IRR > costo de capital → el proyecto es rentable.\n\n"
+                "En Central Link el IRR con financiamiento es **14.41% (Project Closing)** vs 11.03% del Business Plan."
+    },
+    {
+        "keys": ["npv","van","valor presente","net present value","valor actual"],
+        "resp": "📐 **NPV (Net Present Value / Valor Presente Neto)**\n\n"
+                "Es el valor actual de todos los flujos futuros del proyecto descontados a la tasa requerida. "
+                "Si el NPV > 0, el proyecto genera valor por encima del costo de capital.\n\n"
+                "En Central Link el NPV es **$9,640,215 (Project Closing)**."
+    },
+    {
+        "keys": ["roi","retorno sobre inversión","return on investment"],
+        "resp": "📐 **ROI (Return on Investment)**\n\n"
+                "Mide la ganancia o pérdida generada en relación a la inversión realizada.\n\n"
+                "Fórmula: (Ganancia - Inversión) / Inversión × 100\n\n"
+                "En Central Link el ROI es **64.97% (Project Closing)** vs 43.88% del Business Plan."
+    },
+    {
+        "keys": ["equity multiple","multiplicador","moic"],
+        "resp": "📐 **Equity Multiple**\n\n"
+                "Indica cuántas veces se multiplicó el capital invertido al final del proyecto.\n\n"
+                "Ejemplo: 3.76x significa que por cada $1 invertido se recuperaron $3.76.\n\n"
+                "En Central Link el Equity Multiple es **3.76x (Project Closing)** vs 2.68x del Business Plan."
+    },
+    {
+        "keys": ["capex","capital expenditure","gastos de capital","inversión"],
+        "resp": "📐 **CAPEX (Capital Expenditures)**\n\n"
+                "Son las inversiones en activos físicos del proyecto.\n\n"
+                "En Central Link el CAPEX total es **$16,549,458 (Project Closing)**, desglosado en:\n"
+                "- Acquisition: $3,350,000\n"
+                "- Hard Costs: $11,533,678\n"
+                "- Soft Costs: $1,087,695\n"
+                "- Dev. Fee (4%): $578,086"
+    },
+    {
+        "keys": ["opex","gastos operativos","operating costs","costos operación"],
+        "resp": "📐 **OPEX (Operating Expenditures)**\n\n"
+                "Son los costos recurrentes para operar el negocio o proyecto.\n\n"
+                "En Central Link el OPEX es **$671,256 (Project Closing)** vs $540,000 del Business Plan.\n\n"
+                "En el Estado de Resultado, los Gastos Operativos incluyen: Administración, Capital Humano, Marketing y Operativos."
+    },
+    {
+        "keys": ["ebitda","utilidad operativa","earnings before"],
+        "resp": "📐 **EBITDA**\n\n"
+                "Earnings Before Interest, Taxes, Depreciation and Amortization.\n"
+                "Mide la rentabilidad operativa antes de factores financieros y contables.\n\n"
+                "En el Estado de Resultado de CD&P se muestra la **Utilidad Operativa (EBITDA)** comparando "
+                "Ejecutado 2025 vs Presupuesto 2026–2028."
+    },
+    {
+        "keys": ["cap rate","capitalization rate","tasa capitalización"],
+        "resp": "📐 **Cap Rate (Capitalization Rate)**\n\n"
+                "Ratio que mide el rendimiento de un activo inmobiliario basado en su ingreso operativo neto.\n\n"
+                "Fórmula: NOI / Valor del activo\n\n"
+                "En Central Link el Cap Rate es **5.24% (Project Closing)** vs 9.97% del Business Plan."
+    },
+    {
+        "keys": ["cash on cash","coc","retorno efectivo"],
+        "resp": "📐 **Cash-on-Cash Return**\n\n"
+                "Mide el rendimiento anual del flujo de caja en relación al capital invertido en efectivo.\n\n"
+                "En Central Link el Cash-on-Cash es **1.18x (Project Closing)** vs 0.77x del Business Plan."
+    },
+    {
+        "keys": ["revenue","ingresos totales","total revenue"],
+        "resp": "💰 **Total Revenue — Central Link**\n\n"
+                "- **Project Closing:** $30,615,475\n"
+                "- **Business Plan:** $26,064,945\n\n"
+                "Compuesto por:\n"
+                "- Rent (Jul 2026–Jul 2029): $3,615,475 PC\n"
+                "- Sales (Exit Value): $27,000,000 PC"
+    },
+    {
+        "keys": ["net profit","utilidad neta","ganancia neta"],
+        "resp": "💰 **Net Profit — Central Link**\n\n"
+                "- **Project Closing:** $13,394,761\n"
+                "- **Business Plan:** $9,267,602"
+    },
+    {
+        "keys": ["performance fee","performance"],
+        "resp": "💰 **Performance Fee — Central Link**\n\n"
+                "- **Project Closing:** $2,678,952 (20% del Net Profit)\n"
+                "- **Business Plan:** $1,853,520"
+    },
+    {
+        "keys": ["yappy","nequi","fintech","billetera","banco","banking"],
+        "resp": "🏦 **Ecosistema Fintech en Panamá**\n\n"
+                "Las principales plataformas de pago móvil en Panamá incluyen:\n"
+                "- **Yappy** (Banco General) — líder en pagos P2P\n"
+                "- **Nequi Panamá** — cuenta digital sin costo\n\n"
+                "Panamá cuenta con más de 60 bancos con licencia general supervisados por la SBP."
+    },
+    {
+        "keys": ["hola","hello","hi","buenos","buenas","que tal","como estas"],
+        "resp": "👋 ¡Hola! Soy el asistente del **Cuadro de Mando Financiero de CD&P**.\n\n"
+                "Puedo ayudarte con:\n"
+                "- 📊 Información sobre los 3 dashboards\n"
+                "- 📐 Conceptos financieros (IRR, NPV, ROI, CAPEX, EBITDA...)\n"
+                "- 💰 Datos clave de los proyectos\n\n"
+                "¿Qué deseas consultar?"
+    },
+    {
+        "keys": ["ayuda","help","que puedes","qué puedes","que sabes","opciones"],
+        "resp": "🤖 **Puedo ayudarte con:**\n\n"
+                "**Dashboards:**\n"
+                "- Cash Flow Dashboard\n"
+                "- Closing Project Assumptions (Central Link)\n"
+                "- Estado de Resultado\n\n"
+                "**Conceptos financieros:**\n"
+                "- IRR, NPV, ROI, Equity Multiple\n"
+                "- CAPEX, OPEX, EBITDA\n"
+                "- Cap Rate, Cash-on-Cash\n\n"
+                "**Datos del proyecto:**\n"
+                "- Revenue, Net Profit, Total Equity\n"
+                "- Performance Fee\n\n"
+                "Solo escribe tu pregunta."
+    },
+]
 
-st.set_page_config(page_title="Central Link – Investment Summary", layout="wide")
+def responder(pregunta):
+    q = pregunta.lower().strip()
+    q = re.sub(r'[¿?¡!]', '', q)
+    for item in KNOWLEDGE:
+        if any(k in q for k in item["keys"]):
+            return item["resp"]
+    return ("🤔 No tengo información específica sobre eso aún.\n\n"
+            "Puedo ayudarte con los **3 dashboards**, conceptos como **IRR, NPV, ROI, CAPEX, EBITDA** "
+            "o datos de **Central Link y Estado de Resultado**.\n\n"
+            "Escribe **'ayuda'** para ver todo lo que sé.")
 
-# ── ESTILOS ────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Cuadro de Mando Financiero", layout="wide")
+
 st.markdown("""
+<meta name="viewport" content="width=1200">
 <style>
-/* Forzar modo escritorio */
+html, body { min-width: 1200px; }
 .main .block-container {
     min-width: 1100px;
     max-width: 1400px;
     padding-top: 2rem;
+    box-sizing: border-box;
+    overflow-x: auto;
 }
 section[data-testid="stSidebar"] { display: none; }
-@media (max-width: 768px) {
-    .main .block-container { min-width: 1100px; overflow-x: auto; }
+@media (max-width: 1200px) {
+    html, body { min-width: 1200px; overflow-x: auto; }
+    .main .block-container { min-width: 1100px; }
 }
-.kpi-card {
+.app-card {
     background: #ffffff;
-    border-radius: 10px;
-    padding: 0 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    border-radius: 14px;
+    padding: 36px 28px 28px 28px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
     text-align: center;
-    margin-bottom: 12px;
-    height: 140px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    transition: transform 0.2s;
+    height: 340px;
+    position: relative;
     box-sizing: border-box;
 }
-.kpi-label  { font-size: 11px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.3; word-break: break-word; }
-.kpi-pc     { font-size: 20px; font-weight: 900; color: #0052FF; margin: 6px 0 4px; }
-.kpi-bp     { font-size: 12px; color: #888; }
-.section-title {
-    font-size: 20px; font-weight: 900; color: #0052FF;
-    letter-spacing: 1.5px; text-transform: uppercase;
-    margin: 24px 0 12px;
+.app-card > div { width: 100%; }
+.app-btn { position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+.app-card:hover { transform: translateY(-4px); }
+.app-icon   { font-size: 48px; margin-bottom: 8px; }
+.app-title  { font-size: 20px; font-weight: 900; color: #0052FF; text-transform: uppercase; letter-spacing: 1px; margin: 8px 0; }
+.app-desc   { font-size: 14px; color: #666; line-height: 1.5; }
+.app-btn {
+    display: inline-block;
+    background: #0052FF;
+    color: white !important;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 12px 32px;
+    border-radius: 8px;
+    text-decoration: none;
+    margin-top: 16px;
+    letter-spacing: 0.5px;
 }
+.app-btn:hover { background: #0041cc; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── CARGAR DATOS ───────────────────────────────────────────────────────────────
-def cargar():
-    url = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
-    r = requests.get(url)
-    df = pd.read_excel(io.BytesIO(r.content), sheet_name=HOJA, header=None)
-    return df
-
-df = cargar()
-
-def val(fila, col):
-    """Extrae valor numérico de fila (1-indexed) y columna (0-indexed)."""
-    try:
-        return float(df.iloc[fila - 1, col])
-    except:
-        return None
-
-def fmt(v, tipo="num"):
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return "—"
-    if tipo == "pct":
-        return f"{v*100:.2f}%"
-    if tipo == "mult":
-        return f"{v:.2f}x"
-    return f"${v:,.0f}"
-
-# ── EXTRACCIÓN DE DATOS ────────────────────────────────────────────────────────
-# Columnas: D=3(Label) E=4(Executed) F=5(Pending) H=7(Project Closing) K=10(Business Plan)
-PC, BP = 7, 10
-EX, PE = 4, 5
-
-data = {
-    "total_equity_pc":    val(12, PC),
-    "total_equity_bp":    val(12, BP),
-    "total_capex_pc":     val(28, PC),
-    "total_capex_bp":     val(28, BP),
-    "total_opex_pc":      val(34, PC),
-    "total_opex_bp":      val(34, BP),
-    "total_revenue_pc":   val(40, PC),
-    "total_revenue_bp":   val(40, BP),
-    "net_profit_pc":      val(60, PC),
-    "net_profit_bp":      val(60, BP),
-    "irr_pc":             val(68, PC),
-    "irr_bp":             val(68, BP),
-    "coc_pc":             val(69, PC),
-    "coc_bp":             val(69, BP),
-    "npv_pc":             val(70, PC),
-    "npv_bp":             val(70, BP),
-    "eq_mult_pc":         val(71, PC),
-    "eq_mult_bp":         val(71, BP),
-    "roi_pc":             val(74, PC),
-    "roi_bp":             val(74, BP),
-    "roe_pc":             val(75, PC),
-    "roe_bp":             val(75, BP),
-    "cap_rate_pc":        val(76, PC),
-    "cap_rate_bp":        val(76, BP),
-    "capex_acq_pc":       val(24, PC),
-    "capex_hard_pc":      val(25, PC),
-    "capex_soft_pc":      val(26, PC),
-    "capex_dev_pc":       val(27, PC),
-    "rent_pc":            val(38, PC),
-    "sales_pc":           val(39, PC),
-    "performance_pc":     val(80, PC),
-    "performance_bp":     val(80, BP),
-}
-
-# ── TÍTULO ─────────────────────────────────────────────────────────────────────
+# ── ENCABEZADO ─────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="background:#0052FF;padding:18px 28px;border-radius:10px;margin-bottom:24px;">
-  <div style="color:white;font-size:26px;font-weight:900;letter-spacing:2px;">CENTRAL LINK</div>
-  <div style="color:#D0E8FF;font-size:13px;font-weight:600;">Investment Summary — Q4 · Project Closing vs Business Plan</div>
+<div style="background:#0052FF;padding:36px 40px;border-radius:12px;margin-bottom:36px;text-align:center;">
+  <div style="color:white;font-size:40px;font-weight:900;letter-spacing:3px;">CUADRO DE MANDO FINANCIERO</div>
+  <div style="color:#D0E8FF;font-size:17px;font-weight:600;margin-top:8px;">Selecciona el dashboard que deseas consultar</div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── SECCIÓN 1: KPI CARDS ───────────────────────────────────────────────────────
-st.markdown('<div class="section-title">Key Metrics</div>', unsafe_allow_html=True)
+# ── CARDS ──────────────────────────────────────────────────────────────────────
+c1, c2, c3 = st.columns(3)
 
-def kpi_card(label, pc, bp, tipo="num"):
-    return f"""
-    <div class="kpi-card">
-        <div class="kpi-label">{label}</div>
-        <div class="kpi-pc">{fmt(pc, tipo)}</div>
-        <div class="kpi-bp">BP: {fmt(bp, tipo)}</div>
-    </div>"""
+with c1:
+    st.markdown("""
+    <div class="app-card">
+        <div>
+            <div class="app-icon">📊</div>
+            <div class="app-title">Cash Flow Dashboard</div>
+            <div class="app-desc">Monitoreo del flujo de efectivo mensual por período.<br>Ingresos, Gastos Operativos, Taxes y Cierre de Mes 2025–2028.</div>
+        </div>
+        <a class="app-btn" href="https://cashflow-rnqmupyaqzpdva42uw6ywt.streamlit.app/" target="_blank">Abrir →</a>
+    </div>
+    """, unsafe_allow_html=True)
 
-kpis = [
-    ("Total Equity",    data["total_equity_pc"],  data["total_equity_bp"],  "num"),
-    ("Total CAPEX",     data["total_capex_pc"],   data["total_capex_bp"],   "num"),
-    ("Total Revenue",   data["total_revenue_pc"], data["total_revenue_bp"], "num"),
-    ("Net Profit",      data["net_profit_pc"],    data["net_profit_bp"],    "num"),
-    ("IRR",             data["irr_pc"],            data["irr_bp"],           "pct"),
-    ("Equity Multiple", data["eq_mult_pc"],        data["eq_mult_bp"],       "mult"),
-    ("NPV",             data["npv_pc"],             data["npv_bp"],           "num"),
-    ("ROI",             data["roi_pc"],             data["roi_bp"],           "pct"),
-]
+with c2:
+    st.markdown("""
+    <div class="app-card">
+        <div>
+            <div class="app-icon">🏗️</div>
+            <div class="app-title">Closing Project Assumptions</div>
+            <div class="app-desc">Investment Summary Q4.<br>CAPEX, OPEX, Revenue y métricas de retorno: IRR, NPV, ROI, Equity Multiple.</div>
+        </div>
+        <a class="app-btn" href="https://closing-ydh6wy5habve4kbgqchkep.streamlit.app/" target="_blank">Abrir →</a>
+    </div>
+    """, unsafe_allow_html=True)
 
-cols = st.columns(8)
-for i, (label, pc, bp, tipo) in enumerate(kpis):
-    with cols[i % 8]:
-        st.markdown(kpi_card(label, pc, bp, tipo), unsafe_allow_html=True)
+with c3:
+    st.markdown("""
+    <div class="app-card">
+        <div>
+            <div class="app-icon">📈</div>
+            <div class="app-title">Estado de Resultado</div>
+            <div class="app-desc">P&L Presupuesto 2026–2028 vs Ejecutado 2025.<br>Ingresos, Gastos Operativos, EBITDA y Utilidad Neta.</div>
+        </div>
+        <a class="app-btn" href="https://estado-de-resultado-j2xcmkofq7q7zwnqs9ycmu.streamlit.app/" target="_blank">Abrir →</a>
+    </div>
+    """, unsafe_allow_html=True)
 
-# ── SECCIÓN 2: CAPEX ───────────────────────────────────────────────────────────
-st.markdown('<hr style="border:none;border-top:2px solid #e0e0e0;margin:24px 0;">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">CAPEX — Capital Expenditures</div>', unsafe_allow_html=True)
+# ── CHATBOT ────────────────────────────────────────────────────────────────────
+st.markdown('<hr style="border:none;border-top:2px solid #e0e0e0;margin:40px 0 24px;">', unsafe_allow_html=True)
+st.markdown("""
+<div style="text-align:center;margin-bottom:20px;">
+  <span style="font-size:28px;font-weight:900;color:#0052FF;letter-spacing:1px;">🙂 Arturo Aguilar — Tu Analista Financiero</span><br>
+  <span style="font-size:14px;color:#888;">Pregúntame sobre los dashboards, métricas o conceptos financieros</span>
+</div>
+""", unsafe_allow_html=True)
 
-col_left, col_right = st.columns([1, 1])
-
-with col_left:
-    capex_items = [
-        ("Acquisition",   data["capex_acq_pc"]),
-        ("Hard Costs",    data["capex_hard_pc"]),
-        ("Soft Costs",    data["capex_soft_pc"]),
-        ("Dev. Fee (4%)", data["capex_dev_pc"]),
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "🙂 ¡Hola! Soy **Arturo Aguilar**, tu Analista Financiero.\n\nPuedo responderte sobre los 3 dashboards, conceptos como IRR, NPV, CAPEX, EBITDA y datos reales del proyecto.\n\nEscribe **'ayuda'** para ver todo lo que sé."}
     ]
-    rows_html = ""
-    for name, v in capex_items:
-        rows_html += f'<div style="display:flex;justify-content:space-between;padding:10px 20px;border-bottom:1px solid #eee;"><span style="font-weight:600;color:#444;">{name}</span><span style="font-weight:bold;">{fmt(v)}</span></div>'
-    total_row = f'<div style="display:flex;justify-content:space-between;padding:12px 20px;background:#0052FF;border-radius:0 0 10px 10px;"><span style="font-weight:900;color:white;">TOTAL CAPEX</span><span style="font-weight:900;color:white;">{fmt(data["total_capex_pc"])}</span></div>'
-    st.markdown(f'<div style="background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);overflow:hidden;margin-bottom:16px;"><div style="background:#d0e8ff;padding:12px 20px;font-weight:700;font-size:14px;">Project Closing</div>{rows_html}{total_row}</div>', unsafe_allow_html=True)
 
-with col_right:
-    capex_pie = {k: v for k, v in [
-        ("Acquisition", data["capex_acq_pc"]),
-        ("Hard Costs",  data["capex_hard_pc"]),
-        ("Soft Costs",  data["capex_soft_pc"]),
-        ("Dev. Fee",    data["capex_dev_pc"]),
-    ] if v and v > 0}
-    df_pie = pd.DataFrame({"Categoría": list(capex_pie.keys()), "Valor": list(capex_pie.values())})
-    fig = px.pie(df_pie, names="Categoría", values="Valor",
-                 color_discrete_sequence=["#0052FF","#4C9BE8","#2ECC71","#E8C34C"])
-    fig.update_traces(textinfo="label+percent", textposition="outside", textfont=dict(size=13))
-    fig.update_layout(height=340, showlegend=False, margin=dict(t=20,b=20,l=20,r=20))
-    st.plotly_chart(fig, use_container_width=True)
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# ── SECCIÓN 3: OPEX & REVENUE ──────────────────────────────────────────────────
-st.markdown('<hr style="border:none;border-top:2px solid #e0e0e0;margin:24px 0;">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">OPEX & Revenue</div>', unsafe_allow_html=True)
+if prompt := st.chat_input("Escribe tu pregunta aquí..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    respuesta = responder(prompt)
+    st.session_state.messages.append({"role": "assistant", "content": respuesta})
+    with st.chat_message("assistant"):
+        st.markdown(respuesta)
 
-col_opex, col_rev = st.columns([1, 1])
-
-with col_opex:
-    st.markdown(f"""
-    <div style="background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);overflow:hidden;">
-        <div style="background:#d0e8ff;padding:12px 20px;font-weight:700;font-size:14px;">OPEX — Operating Costs</div>
-        <div style="display:flex;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #eee;">
-            <span style="font-weight:600;color:#444;">Project Closing</span>
-            <span style="font-weight:bold;">{fmt(data["total_opex_pc"])}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:14px 20px;background:#f9f9f9;">
-            <span style="font-weight:600;color:#444;">Business Plan</span>
-            <span style="font-weight:bold;">{fmt(data["total_opex_bp"])}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col_rev:
-    rent = data["rent_pc"] or 0
-    sales = data["sales_pc"] or 0
-    total_rev = data["total_revenue_pc"] or 0
-    st.markdown(f"""
-    <div style="background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);overflow:hidden;">
-        <div style="background:#d0e8ff;padding:12px 20px;font-weight:700;font-size:14px;">Revenue — Project Closing</div>
-        <div style="display:flex;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #eee;">
-            <span style="font-weight:600;color:#444;">Rent (Jul 2026–Jul 2029)</span>
-            <span style="font-weight:bold;">{fmt(rent)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #eee;">
-            <span style="font-weight:600;color:#444;">Sales (Exit Value)</span>
-            <span style="font-weight:bold;">{fmt(sales)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:12px 20px;background:#0052FF;border-radius:0 0 10px 10px;">
-            <span style="font-weight:900;color:white;">TOTAL REVENUE</span>
-            <span style="font-weight:900;color:white;">{fmt(total_rev)}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ── SECCIÓN 4: PERFORMANCE ─────────────────────────────────────────────────────
-st.markdown('<hr style="border:none;border-top:2px solid #e0e0e0;margin:24px 0;">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">Performance Metrics</div>', unsafe_allow_html=True)
-
-perf_items = [
-    ("IRR with Financing", data["irr_pc"],       data["irr_bp"],       "pct"),
-    ("Cash-on-Cash",       data["coc_pc"],        data["coc_bp"],       "mult"),
-    ("NPV",                data["npv_pc"],         data["npv_bp"],        "num"),
-    ("Equity Multiple",    data["eq_mult_pc"],    data["eq_mult_bp"],   "mult"),
-    ("ROI",                data["roi_pc"],         data["roi_bp"],        "pct"),
-    ("ROE",                data["roe_pc"],         data["roe_bp"],        "mult"),
-    ("Cap Rate",           data["cap_rate_pc"],   data["cap_rate_bp"],  "pct"),
-    ("Performance Fee",    data["performance_pc"],data["performance_bp"],"num"),
-]
-
-header = '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;padding:10px 20px;background:#0052FF;border-radius:10px 10px 0 0;"><span style="color:white;font-weight:700;">Metric</span><span style="color:white;font-weight:700;text-align:right;">Project Closing</span><span style="color:white;font-weight:700;text-align:right;">Business Plan</span></div>'
-rows = ""
-for i, (name, pc, bp, tipo) in enumerate(perf_items):
-    bg = "#f9f9f9" if i % 2 == 0 else "#ffffff"
-    rows += f'<div style="display:grid;grid-template-columns:2fr 1fr 1fr;padding:10px 20px;background:{bg};border-bottom:1px solid #eee;"><span style="font-weight:600;color:#444;">{name}</span><span style="font-weight:bold;text-align:right;color:#0052FF;">{fmt(pc, tipo)}</span><span style="color:#888;text-align:right;">{fmt(bp, tipo)}</span></div>'
-
-st.markdown(f'<div style="background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);overflow:hidden;">{header}{rows}</div>', unsafe_allow_html=True)
+# ── FOOTER ─────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div style="text-align:center;margin-top:48px;color:#aaa;font-size:13px;">
+    CD&P Real Estate Management · Cuadro de Mando Financiero
+</div>
+""", unsafe_allow_html=True)

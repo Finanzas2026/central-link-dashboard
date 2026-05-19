@@ -11,7 +11,7 @@ st.set_page_config(page_title="Central Link – Investment Summary", layout="wid
 
 def check_password():
     import time
-    SESSION_TIMEOUT = 8 * 3600  # 8 horas en segundos
+    SESSION_TIMEOUT = 30 * 60  # 30 minutos — expira al refrescar o tras inactividad
     now = time.time()
     auth_time = st.session_state.get("auth_time", 0)
     if st.session_state.get("authenticated") and (now - auth_time) < SESSION_TIMEOUT:
@@ -180,9 +180,14 @@ kpis = [
     ("ROI",             data["roi_pc"],             data["roi_bp"],           "pct"),
 ]
 
-cols = st.columns(8)
-for i, (label, pc, bp, tipo) in enumerate(kpis):
-    with cols[i % 8]:
+row1 = st.columns(4)
+for i, (label, pc, bp, tipo) in enumerate(kpis[:4]):
+    with row1[i]:
+        st.markdown(kpi_card(label, pc, bp, tipo), unsafe_allow_html=True)
+
+row2 = st.columns(4)
+for i, (label, pc, bp, tipo) in enumerate(kpis[4:]):
+    with row2[i]:
         st.markdown(kpi_card(label, pc, bp, tipo), unsafe_allow_html=True)
 
 # ── SECCIÓN 2: CAPEX ───────────────────────────────────────────────────────────
